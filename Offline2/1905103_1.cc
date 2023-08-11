@@ -24,50 +24,94 @@ using namespace ns3;
 
 NS_LOG_COMPONENT_DEFINE("1905103-offline-1");
 
-Ptr<PacketSink> sink;     //!< Pointer to the packet sink application
-uint64_t lastTotalRx = 0; //!< The value of the last total received bytes
-Ptr<OutputStreamWrapper> stream;
+ApplicationContainer receiverApps;
+uint32_t totalSentPackets=0;
+uint32_t PacketSentTillLastSec=0;
+uint32_t totalReceivedPackets=0;
+uint32_t PacketReceivedTillLastSec=0;
+uint32_t prevSecReceive=0;
 
-void
-CalculateThroughput()
+double totalByteReceived()
 {
-    Time now = Simulator::Now(); /* Return the simulator's virtual time. */
-    double cur = (sink->GetTotalRx() - lastTotalRx) * 8.0 /
-                 1e6 / 0.5; /* Convert Application RX Packets to MBits. */
-    // std::cout << now.GetSeconds() << "s: \t" << cur << " Mbit/s" << std::endl;
-    NS_LOG_UNCOND(now.GetSeconds() << "s: \t" << cur << " Mbit/s");
-    *stream->GetStream() << now.GetSeconds() << "\t" << cur  << std::endl;
-    lastTotalRx = sink->GetTotalRx();
-    // std::cout << "Sink total received : " << sink->GetTotalRx() << std::endl;
-    Simulator::Schedule(MilliSeconds(500), &CalculateThroughput);
+    double x=0;
+    uint32_t nApps=receiverApps.GetN();
+    for(uint32_t i=0;i<nApps;i++)
+    {
+        Ptr<PacketSink> sink=StaticCast<PacketSink>(receiverApps.Get(i));
+        x+=sink->GetTotalRx();
+    }
+    return x;
+}
+
+void packetSent(Ptr<const Packet>packet)
+{
+  totalSentPackets++;
+}
+
+void packetReceived(Ptr<const Packet> packet,const Address &address)
+{
+  totalReceivedPackets++;
+}
+
+void CalculateThroughput()
+{
+    double rx=totalByteReceived();
+    uint32_t tmp=rx;
+    rx=rx-prevSecReceive;
+    prevSecReceive=tmp;
+    rx=(rx*8.0)/1e6;
+    std::cout<<std::fixed;
+    std::cout<<(Simulator::Now()).GetSeconds()<<" "<<rx<<" Mbps"<<std::endl;
+    Simulator::Schedule(Seconds(1.0),&CalculateThroughput);
+}
+
+void CalculatePacketDeliveryRatio()
+{
+    uint32_t nPacketReceived=totalReceivedPackets-PacketReceivedTillLastSec;
+    uint32_t nPacketSent=totalSentPackets-PacketSentTillLastSec;
+    double ratio=0;
+    std::cout<<(Simulator::Now()).GetSeconds()<<" packetSent: "<<nPacketSent<<std::endl;
+    std::cout<<(Simulator::Now()).GetSeconds()<<" packetReceived: "<<nPacketReceived<<std::endl;
+    PacketSentTillLastSec=totalSentPackets;
+    PacketReceivedTillLastSec=totalReceivedPackets;
+    if(nPacketSent)
+    {
+      ratio=(double)nPacketReceived/(double)nPacketSent;
+      std::cout<<(Simulator::Now()).GetSeconds()<<" Packet delivery ratio: "<<ratio<<std::endl;
+    }
+    Simulator::Schedule(Seconds(1.0),&CalculatePacketDeliveryRatio);
 }
 
 int main(int argc,char* argv[])
 {
     bool verbose=true;
-    uint32_t nWifi=10;
-    uint32_t payloadSize=1024;
-    int num_flow=100;
-    int dataRate=5;
-    bool tracing=false;
-    
-    CommandLine cmd(__FILE__);
-    //cmd.AddValue("nCsma", "Number of \"extra\" CSMA nodes/devices", nCsma);
-    cmd.AddValue("nWifi", "Number of wifi STA devices", nWifi);
-    cmd.AddValue("verbose", "Tell echo applications to log if true", verbose);
-    cmd.AddValue("tracing", "Enable pcap tracing", tracing);
+    uint32_t nNodes = 20;
+    uint32_t nFlows = 40;
+    uint32_t nPackets = 100;  
+    //std::string speed = "5m/s";  //for wireless mobile topology
+    uint32_t coverageArea = 10; //for static topology
+    uint32_t Tx_range = 5;
 
+    std::string bottleNeckLinkBw = "5Mbps";
+    std::string bottleNeckLinkDelay = "50ms";
+    
+
+    CommandLine cmd(__FILE__);
+    cmd.AddValue ("nNodes","Number of left and right side leaf nodes", nNodes);
+    cmd.AddValue ("nFlows","Number of flows", nFlows);
+    cmd.AddValue ("nPackets", "Number of packets per second", nPackets);
+    //cmd.AddValue ("speed", "Speed of nodes:", speed);
+    cmd.AddValue("CoverageArea", "Coverage area for static topology", coverageArea);
     cmd.Parse(argc, argv);
 
-    // The underlying restriction of 18 is due to the grid position
-    // allocator's configuration; the grid layout will exceed the
-    // bounding box if more than 18 nodes are provided.
-    if (nWifi > 18)
-    {
-        std::cout << "nWifi should be 18 or less; otherwise grid layout exceeds the bounding box"
-                  << std::endl;
-        return 1;
-    }
+    uint32_t dataRateInt = (nPackets * 1024 * 8);
+    std::string dataRate = std::to_string(dataRateInt) + "bps"; 
+    uint32_t payloadSize = 1024;           /* Transport layer payload size in bytes. it is same as the pckt size */
+    uint32_t nWifi = nNodes/2;
+    Tx_range *= coverageArea;
+    bool tracing=false;
+    
+    cmd.Parse(argc, argv);
 
     if (verbose)
     {
@@ -83,8 +127,8 @@ int main(int argc,char* argv[])
     p2pNodes.Create(2);
 
     PointToPointHelper pointToPoint;
-    pointToPoint.SetDeviceAttribute("DataRate",StringValue("5Mbps"));
-    pointToPoint.SetChannelAttribute("Delay",StringValue("2ms"));
+    pointToPoint.SetDeviceAttribute("DataRate",StringValue(bottleNeckLinkBw));
+    pointToPoint.SetChannelAttribute("Delay",StringValue(bottleNeckLinkDelay));
 
     NetDeviceContainer p2pDevices;
     p2pDevices=pointToPoint.Install(p2pNodes);
@@ -103,11 +147,19 @@ int main(int argc,char* argv[])
     phy1.SetChannel(channel1.Create());
 
     WifiHelper wifi;
-    wifi.SetRemoteStationManager("ns3::AarfWifiManager");
+    //wifi.SetRemoteStationManager("ns3::AarfWifiManager");
 
     WifiMacHelper mac0,mac1;
     Ssid ssid0=Ssid("ns-3-ssid-0");
     Ssid ssid1=Ssid("ns-3-ssid-1");
+
+    mac0.SetType ("ns3::StaWifiMac",
+                "Ssid", SsidValue (ssid0),
+                "ActiveProbing", BooleanValue (false)); 
+                
+    mac1.SetType ("ns3::StaWifiMac",
+                "Ssid", SsidValue (ssid1),
+                "ActiveProbing", BooleanValue (false));
 
     NetDeviceContainer staDevices0,staDevices1;
     mac0.SetType("ns3::StaWifiMac","Ssid",SsidValue(ssid0),"ActiveProbing",BooleanValue(false));
@@ -116,9 +168,44 @@ int main(int argc,char* argv[])
     staDevices0=wifi.Install(phy0,mac0,wifiStaNodes0);
     staDevices1=wifi.Install(phy1,mac1,wifiStaNodes1);
 
+    mac0.SetType ("ns3::ApWifiMac",
+                "Ssid", SsidValue (ssid0));
+    mac1.SetType ("ns3::ApWifiMac",
+                "Ssid", SsidValue (ssid1));
+
     NetDeviceContainer apDevices0,apDevices1;
     apDevices0=wifi.Install(phy0,mac0,wifiApNode0);
     apDevices1=wifi.Install(phy1,mac1,wifiApNode1);
+
+    MobilityHelper mobility;
+
+  mobility.SetPositionAllocator ("ns3::GridPositionAllocator",
+                                 "MinX", DoubleValue (0.0),
+                                 "MinY", DoubleValue (0.0),
+                                 "DeltaX", DoubleValue (0.5),
+                                 "DeltaY", DoubleValue (1.0),
+                                 "GridWidth", UintegerValue (nNodes/2),
+                                 "LayoutType", StringValue ("RowFirst"));
+
+  // // tell STA nodes how to move
+  // mobility.SetMobilityModel ("ns3::RandomWalk2dMobilityModel",
+  //                            "Bounds", RectangleValue (Rectangle (-50, 50, -50, 50)));  
+  
+  // // tell STA nodes how to move
+  // mobility.SetMobilityModel ("ns3::RandomWalk2dMobilityModel",
+  //                            "Bounds", RectangleValue (Rectangle (-50, 50, -50, 50)),
+  //                            "Speed", StringValue ("ns3::ConstantRandomVariable[Constant="+std::to_string(speed)+"]"));
+   mobility.SetMobilityModel ("ns3::ConstantPositionMobilityModel");
+   Config::SetDefault("ns3::RangePropagationLossModel::MaxRange",DoubleValue(Tx_range));
+  // install on STA nodes
+  mobility.Install (wifiStaNodes0);
+  mobility.Install (wifiStaNodes1);
+
+  // tell AP node to stay still
+  mobility.SetMobilityModel ("ns3::ConstantPositionMobilityModel");
+  // install on AP node
+  mobility.Install (wifiApNode0);
+  mobility.Install (wifiApNode1);
 
     InternetStackHelper stack;
     stack.Install(wifiApNode0);
@@ -140,39 +227,59 @@ int main(int argc,char* argv[])
     Ipv4InterfaceContainer staNodeInterfaces1=address.Assign(staDevices1);
     Ipv4InterfaceContainer apNodeInterfaces1=address.Assign(apDevices1);
 
-    Ipv4GlobalRoutingHelper::PopulateRoutingTables();
-
-    ApplicationContainer senderApps;
-    ApplicationContainer receiverApps;
-
-    int port=9;
-    int temp=num_flow;
-    while(true)
+    PacketSinkHelper packetSinkHelper("ns3::TcpSocketFactory",InetSocketAddress(Ipv4Address::GetAny(),9));
+    for(uint32_t i=0;i<nWifi;i++)
     {
-      for(int i=0;i<nWifi/2;i++)
-      {
-        OnOffHelper senderHelper("ns3::TcpSocketFactory",InetSocketAddress(staNodeInterfaces1.GetAddress(i),port));
-        senderHelper.SetAttribute("PacketSize",UintegerValue(payloadSize));
-        senderHelper.SetAttribute("OnTime",StringValue("ns3::ConstantRandomVariable[Constant=1]"));
-        senderHelper.SetAttribute("OffTime",StringValue("ns3::ConstantRandomVariable[Constant=0]"));
-        senderHelper.SetAttribute("DataRate",DataRateValue(DataRate(dataRate)));
-
-        senderApps.Add(senderHelper.Install(wifiStaNodes0.Get(i)));
-
-        PacketSinkHelper receiverHelper("ns3::TcpSocketFactory",InetSocketAddress(Ipv4Address::GetAny(),port));
-        receiverApps.Add(receiverHelper.Install(wifiStaNodes1.Get(i)));
-
-        port++;
-        temp--;
-        if(temp==0)
-          break;
-      }
-      if(temp==0)
-        break;
+        receiverApps.Add(packetSinkHelper.Install(wifiStaNodes1.Get(i)));
     }
 
+    OnOffHelper senderHelper("ns3::TcpSocketFactory",Address());
+    senderHelper.SetAttribute("OnTime",StringValue("ns3::ConstantRandomVariable[Constant=1]"));
+    senderHelper.SetAttribute("OffTime",StringValue("ns3::ConstantRandomVariable[Constant=0]"));
+    senderHelper.SetAttribute("PacketSize",UintegerValue(payloadSize));
+    senderHelper.SetAttribute("DataRate",DataRateValue(DataRate(dataRate)));
+
+    ApplicationContainer senderApps;
+
+    uint32_t curFlow=0;
+    while(curFlow<nFlows)
+    {
+        for(uint32_t i=0;i<nWifi;i++)
+        {
+            AddressValue remoteAddress(InetSocketAddress(staNodeInterfaces1.GetAddress(i),9));
+            senderHelper.SetAttribute("Remote",remoteAddress);
+            senderApps.Add(senderHelper.Install(wifiStaNodes0.Get(i)));
+            curFlow++;
+
+            if(curFlow==nFlows)
+              break;
+        }
+    }
     receiverApps.Start(Seconds(1.0));
     senderApps.Start(Seconds(2.0));
+    senderApps.Stop(Seconds(6.0));
+    receiverApps.Stop(Seconds(6.5));
 
-    return 0;
+    Simulator::Schedule(Seconds(1.0),&CalculateThroughput);
+    Simulator::Schedule(Seconds(1.0),&CalculatePacketDeliveryRatio);
+
+
+    Ipv4GlobalRoutingHelper::PopulateRoutingTables();
+
+    Simulator::Stop(Seconds(10.0));
+
+    //Trace
+    for(uint32_t i=0;i<senderApps.GetN();i++)
+    {
+      Ptr<OnOffApplication> packet=StaticCast<OnOffApplication>(senderApps.Get(i));
+      packet->TraceConnectWithoutContext("Tx",MakeCallback(&packetSent));
+    }
+
+    for(uint32_t i=0;i<receiverApps.GetN();i++)
+    {
+      Ptr<OnOffApplication> packet=StaticCast<OnOffApplication>(receiverApps.Get(i));
+      packet->TraceConnectWithoutContext("Rx",MakeCallback(&packetReceived));
+    }
+    Simulator::Run();
+    Simulator::Destroy();
 }
