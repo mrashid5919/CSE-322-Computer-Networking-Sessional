@@ -179,7 +179,7 @@ int main()
     for(int i=0;i<sender_column_serialized.size();i++)
     {
         if(i>=sender_column_serialized.size()-degree)
-            SetConsoleTextAttribute(GetStdHandle(STD_OUTPUT_HANDLE), 3);
+            SetConsoleTextAttribute(GetStdHandle(STD_OUTPUT_HANDLE), 11);
         cout<<sender_column_serialized[i];
     }
     cout<<endl;
@@ -215,7 +215,7 @@ int main()
         {
             if(i==pos[idx+1])
             {
-                SetConsoleTextAttribute(GetStdHandle(STD_OUTPUT_HANDLE),4);
+                SetConsoleTextAttribute(GetStdHandle(STD_OUTPUT_HANDLE),12);
                 idx++;
             }
             else
@@ -227,6 +227,7 @@ int main()
     }
     cout<<endl;
 
+    //checking CRC checksum to detect error
     int flag=0;
     tmp=sender_column_serialized;
     for(int i=0;i<frame_size-degree;i++)
@@ -255,4 +256,70 @@ int main()
         cout<<"error detected"<<endl;
     else
         cout<<"no error detected"<<endl;
+
+    //building data block after removing checksum bits
+    sender_column_serialized.clear();
+    sender_column_serialized=tmp;
+    /*cout<<endl<<"checking received frame:"<<endl;
+    idx=-1;
+    for(int i=0;i<frame_size;i++)
+    {
+        if(idx+1<pos.size())
+        {
+            if(i==pos[idx+1])
+            {
+                SetConsoleTextAttribute(GetStdHandle(STD_OUTPUT_HANDLE),12);
+                idx++;
+            }
+            else
+                SetConsoleTextAttribute(h,word_old_color_attributes);
+        }
+        else
+            SetConsoleTextAttribute(h,word_old_color_attributes);
+        cout<<sender_column_serialized[i];
+    }
+    cout<<endl;*/
+    vector<string> received_datablock_with_check_bits;
+    map<pair<int,int>,int> error_pos;
+    idx=-1;
+    //cout<<"frame size: "<<frame_size<<endl;
+    for(int i=0;i<frame_size-degree;i++)
+    {
+        /*if(i!=0 && i%(data_block.size()/m)==0)
+        {
+            cout<<i/(data_block.size()/m)<<endl;
+            for(int j=0;j<data_block.size()/m;j++)
+                cout<<received_datablock_with_check_bits[j]<<endl;
+            cout<<endl;
+        }*/
+        if(i<data_block.size())
+        {
+            string stmp;
+            stmp.push_back(sender_column_serialized[i]);
+            received_datablock_with_check_bits.push_back(stmp);
+        }
+        else
+            received_datablock_with_check_bits[i%(data_block.size())].push_back(sender_column_serialized[i]);
+        if(idx+1<pos.size())
+        {
+            if(i==pos[idx+1])
+            {
+                error_pos[{i%(data_block.size()),i/(data_block.size())}]++;
+                idx++;
+            }
+        }
+    }
+    cout<<endl<<"data block after removing CRC checksum bits:"<<endl;
+    for(int i=0;i<data_block.size();i++)
+    {
+        for(int j=0;j<(8*m)+r;j++)
+        {
+            if(error_pos[{i,j}]==1)
+                SetConsoleTextAttribute(GetStdHandle(STD_OUTPUT_HANDLE),12);
+            else
+                SetConsoleTextAttribute(h,word_old_color_attributes);
+            cout<<received_datablock_with_check_bits[i][j];
+        }
+        cout<<endl;
+    }
 }
