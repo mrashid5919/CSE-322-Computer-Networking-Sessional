@@ -184,4 +184,75 @@ int main()
     }
     cout<<endl;
     SetConsoleTextAttribute(h,word_old_color_attributes);
+
+    //Simulating received frame
+    int frame_size=sender_column_serialized.size();
+
+    vector<int> pos;
+
+    srand(time(0));
+
+    for(int i=0;i<frame_size;i++)
+    {
+        int random_number=rand()%10000;
+        if(random_number*0.0001<p)
+            pos.push_back(i);
+    }
+
+    for(int i=0;i<pos.size();i++)
+    {
+        if(sender_column_serialized[pos[i]]=='0')
+            sender_column_serialized[pos[i]]='1';
+        else
+            sender_column_serialized[pos[i]]='0';
+    }
+
+    cout<<endl<<"received frame:"<<endl;
+    int idx=-1;
+    for(int i=0;i<frame_size;i++)
+    {
+        if(idx+1<pos.size())
+        {
+            if(i==pos[idx+1])
+            {
+                SetConsoleTextAttribute(GetStdHandle(STD_OUTPUT_HANDLE),4);
+                idx++;
+            }
+            else
+                SetConsoleTextAttribute(h,word_old_color_attributes);
+        }
+        else
+            SetConsoleTextAttribute(h,word_old_color_attributes);
+        cout<<sender_column_serialized[i];
+    }
+    cout<<endl;
+
+    int flag=0;
+    tmp=sender_column_serialized;
+    for(int i=0;i<frame_size-degree;i++)
+    {
+        if(sender_column_serialized[i]=='0')
+            continue;
+        for(int j=0;j<=degree;j++)
+        {
+            if(sender_column_serialized[i+j]==gen_polynomial[j])
+                sender_column_serialized[i+j]='0';
+            else
+                sender_column_serialized[i+j]='1';
+        }
+    }
+    for(int i=0;i<frame_size;i++)
+    {
+        if(sender_column_serialized[i]=='1')
+        {
+            flag=1;
+            break;
+        }
+    }
+
+    cout<<endl<<"result of CRC checksum matching: ";
+    if(flag)
+        cout<<"error detected"<<endl;
+    else
+        cout<<"no error detected"<<endl;
 }
