@@ -2,8 +2,10 @@
 #include<windows.h>
 using namespace std;
 
+
 int main()
 {
+    srand(time(NULL));
     string data;
     int m;
     double p;
@@ -11,9 +13,9 @@ int main()
 
     cout<<"enter data string: ";
     getline(cin,data);
-    cout<<"enter number of data bytes in a row <m>: ";
+    cout<<"enter number of data bytes in a row (m): ";
     cin>>m;
-    cout<<"enter probability <p>: ";
+    cout<<"enter probability (p): ";
     cin>>p;
     cin.get();
     cout<<"enter generator polynomial: ";
@@ -38,7 +40,7 @@ int main()
             data_block[i/m].append(binary_ascii_value);
     }
 
-    cout<<endl<<"data block <ascii code of m characters per row>:"<<endl;
+    cout<<endl<<"data block (ascii code of m characters per row):"<<endl;
     for(int i=0;i<data.size()/m;i++)
         cout<<data_block[i]<<endl;
 
@@ -190,7 +192,7 @@ int main()
 
     vector<int> pos;
 
-    srand(time(0));
+    
 
     for(int i=0;i<frame_size;i++)
     {
@@ -226,6 +228,7 @@ int main()
         cout<<sender_column_serialized[i];
     }
     cout<<endl;
+    SetConsoleTextAttribute(h,word_old_color_attributes);
 
     //checking CRC checksum to detect error
     int flag=0;
@@ -322,4 +325,65 @@ int main()
         }
         cout<<endl;
     }
+    SetConsoleTextAttribute(h,word_old_color_attributes);
+    //attempt error correction and removing check bits
+    vector<string> received_datablock_without_check_bits;
+    for(int i=0;i<data_block.size();i++)
+    {
+        int ps=0;
+        for(int j=0;j<r;j++)
+        {
+            int val=0;
+            for(int k=0;k<(8*m)+r;k++)
+            {
+                if((k+1)&(1<<j))
+                {
+                    // int tmp=data_block_with_check_bits[i][pr[j]-1]-'0';
+                    val^=(received_datablock_with_check_bits[i][k]-'0');
+                }
+            }
+            //data_block_with_check_bits[i][pr[j]-1]=(char)('0'+val);
+            if(val!=0)
+                ps+=(1<<j);
+        }
+        if(ps!=0 && ps<=(8*m)+r)
+        {
+            if(received_datablock_with_check_bits[i][ps-1]=='0')
+                received_datablock_with_check_bits[i][ps-1]='1';
+            else
+                received_datablock_with_check_bits[i][ps-1]='0';
+        }
+        int j=0;
+        string s;
+        for(int l=0;l<8*m+r;l++)
+        {
+            if(l+1==(1<<j))
+                j++;
+            else
+                s.push_back(received_datablock_with_check_bits[i][l]);
+        }
+        // for(int j=0;j<r;j++)
+        //     received_datablock_with_check_bits[i].erase((1<<j)-1,1);
+        received_datablock_without_check_bits.push_back(s);
+    }
+    cout<<endl<<"data block after removing check bits:"<<endl;
+    for(int i=0;i<data_block.size();i++)
+        cout<<received_datablock_without_check_bits[i]<<endl;
+
+    //Output frame
+    cout<<endl<<"output frame: ";
+    for(int i=0;i<data_block.size();i++)
+    {
+        int c=0;
+        for(int j=0;j<m*8;j++)
+        {
+            c=c*2+(received_datablock_without_check_bits[i][j]-'0');
+            if(j%8==7)
+            {
+                cout<<(char)c;
+                c=0;
+            }
+        }
+    }
+    return 0;
 }
